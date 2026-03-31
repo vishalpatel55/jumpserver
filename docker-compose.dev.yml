@@ -1,0 +1,93 @@
+services:
+
+  db:
+    image: postgres:15-alpine
+    container_name: jms_db
+    restart: always
+    environment:
+      POSTGRES_DB: jumpserver
+      POSTGRES_USER: jumpserver
+      POSTGRES_PASSWORD: jms_dev_pass_2024
+    ports:
+      - "5432:5432"
+    volumes:
+      - jms_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jumpserver"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: jms_redis
+    restart: always
+    command: redis-server --requirepass redis_dev_pass_2024
+    ports:
+      - "6379:6379"
+
+  koko:
+    image: jumpserver/koko:v4.10.16-ce
+    container_name: jms_koko
+    restart: always
+    privileged: true
+    environment:
+      CORE_HOST: "http://host.docker.internal:8080"
+      BOOTSTRAP_TOKEN: "ChangeMeToA24CharToken123456"
+      LOG_LEVEL: DEBUG
+    ports:
+      - "2222:2222"
+      - "5000:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  lion:
+    image: jumpserver/lion:v4.10.16-ce
+    container_name: jms_lion
+    restart: always
+    environment:
+      CORE_HOST: "http://host.docker.internal:8080"
+      BOOTSTRAP_TOKEN: "ChangeMeToA24CharToken123456"
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8081:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  chen:
+    image: jumpserver/chen:v4.10.16-ce
+    container_name: jms_chen
+    restart: always
+    environment:
+      CORE_HOST: "http://host.docker.internal:8080"
+      BOOTSTRAP_TOKEN: "ChangeMeToA24CharToken123456"
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8082:8082"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web:
+    image: jumpserver/web:v4.10.16-ce
+    container_name: jms_web
+    restart: always
+    environment:
+      CORE_HOST: "http://host.docker.internal:8080"
+    ports:
+      - "80:80"
+    volumes:
+      - jms_data:/opt/jumpserver/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  core:
+    image: nginx:alpine
+    container_name: jms_core_proxy
+    restart: always
+    volumes:
+      - ./core-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  jms_pg_data:
+  jms_data:
