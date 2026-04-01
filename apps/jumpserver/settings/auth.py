@@ -360,3 +360,35 @@ ONLY_ALLOW_AUTH_FROM_SOURCE = CONFIG.ONLY_ALLOW_AUTH_FROM_SOURCE
 PRIVACY_MODE = CONFIG.PRIVACY_MODE
 
 SAML_FOLDER = os.path.join(BASE_DIR, 'authentication', 'backends', 'saml2')
+
+# ── Keycloak-only: disable all other authentication methods ──────────────
+AUTH_LDAP = False
+AUTH_LDAP_HA = False
+AUTH_CAS = False
+AUTH_SAML2 = False
+AUTH_RADIUS = False
+AUTH_OPENID = False
+AUTH_OAUTH2 = False
+AUTH_WECOM = False
+AUTH_DINGTALK = False
+AUTH_FEISHU = False
+AUTH_LARK = False
+AUTH_SLACK = False
+AUTH_PASSKEY = False
+
+LOGIN_REDIRECT_TO_BACKEND = 'DIRECT'
+
+# Must include RBAC_BACKEND first — JumpServer uses it for all permission checks
+# Then Keycloak backend for actual authentication
+# Then ModelBackend for Django internals (management commands, admin)
+AUTHENTICATION_BACKENDS = [
+    RBAC_BACKEND,                                              # permission checks — must stay
+    'authentication.backends.keycloak.KeycloakOIDCBackend',   # our Keycloak auth
+    AUTH_BACKEND_MODEL,                                        # for management commands only
+    AUTH_BACKEND_AUTH_TOKEN,                                   # for koko/lion/chen component tokens
+    AUTH_BACKEND_SSO,                                          # for component SSO tokens
+]
+
+# Redirect unauthenticated browser requests to Keycloak selector
+# instead of the built-in form login page
+LOGIN_URL = '/'

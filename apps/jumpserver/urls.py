@@ -10,6 +10,8 @@ from django.conf.urls.static import static
 from django.urls import path, include, re_path
 from django.views.i18n import JavaScriptCatalog
 
+from tenant_platform.views import tenant_login_selector
+
 from . import views, api
 
 resource_api = [
@@ -31,6 +33,7 @@ resource_api = [
     path('rbac/', include('rbac.urls.api_urls', namespace='api-rbac')),
     path('labels/', include('labels.urls', namespace='api-label')),
     path('reports/', include('reports.urls.api_urls', namespace='api-reports')),
+    path('tenant_platform/', include('tenant_platform.urls', namespace='api-tenant_platform')),
 ]
 
 api_v1 = resource_api + [
@@ -45,7 +48,9 @@ if settings.MCP_ENABLED:
     ])
 
 app_view_patterns = [
+    path('auth/login/', views.KeycloakLoginRedirectView.as_view(), name='auth-login-redirect'),
     path('auth/', include('authentication.urls.view_urls'), name='auth'),
+    path('auth/keycloak/', include('authentication.urls.oidc'), name='keycloak-auth'), 
     path('ops/', include('ops.urls.view_urls'), name='ops'),
     path('reports/', include('reports.urls.view_urls'), name='reports'),
     path('tickets/', include('tickets.urls.view_urls'), name='tickets'),
@@ -62,7 +67,8 @@ if settings.XPACK_ENABLED:
     )
 
 urlpatterns = [
-    path('', views.IndexView.as_view(), name='index'),
+
+    path('', tenant_login_selector, name='index'), 
     path('api/v1/', include(api_v1)),
     path('api/health/', api.HealthCheckView.as_view(), name="health"),
     path('api/v1/health/', api.HealthCheckView.as_view(), name="health_v1"),

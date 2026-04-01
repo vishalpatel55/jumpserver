@@ -76,6 +76,7 @@ services:
       - "80:80"
     volumes:
       - jms_data:/opt/jumpserver/data
+      - ./web-override.conf:/etc/nginx/conf.d/default.conf:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

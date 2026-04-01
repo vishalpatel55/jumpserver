@@ -151,6 +151,14 @@ def prepare():
     download_ip_db()
     install_builtin_applets()
     init_oauth2_provider()
+    bootstrap_platform()
+
+def bootstrap_platform():
+    logging.info("Bootstrap platform master tenant")
+    try:
+        management.call_command('bootstrap_platform')
+    except Exception as e:
+        logging.error(f"Bootstrap platform failed: {e}")
 
 
 def start_services():

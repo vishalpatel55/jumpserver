@@ -151,3 +151,15 @@ class RedirectConfirm(TemplateView):
         if parsed.scheme not in ['http', 'https', 'jms']:
             return False
         return True
+    
+class KeycloakLoginRedirectView(View):
+    """
+    Intercepts /core/auth/login/ — Lina frontend hardcodes this URL
+    for unauthenticated 401 redirects. Send to Keycloak instead.
+    """
+    def get(self, request, *args, **kwargs):
+        next_url = request.GET.get('next', '/ui/')
+        tenant_slug = request.session.get('last_tenant_slug', 'master')
+        return redirect(
+            f'/core/auth/keycloak/login/?tenant={tenant_slug}&next={next_url}'
+        )

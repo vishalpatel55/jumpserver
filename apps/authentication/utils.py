@@ -16,6 +16,8 @@ from common.utils import static_or_direct
 from users.models import User
 from .notifications import DifferentCityLoginMessage
 
+from tenant_platform.models import Tenant
+
 logger = get_logger(__file__)
 
 
@@ -81,7 +83,35 @@ def check_user_property_is_correct(username, **properties):
 
 
 def get_auth_methods():
-    return [
+
+    """
+    Returns auth methods shown on the login page.
+    Keycloak-only: all other methods removed from UI.
+    """
+    methods = []
+    # Add one entry per active tenant's Keycloak config
+    # so the login page shows a "Login with Keycloak" button per tenant
+    try:
+        tenants = Tenant.objects.filter(
+            is_active=True
+        ).select_related('keycloak_config')
+        for tenant in tenants:
+            try:
+                if tenant.keycloak_config.is_active:
+                    methods.append({
+                        'name': f'keycloak_{tenant.slug}',
+                        'label': f'Login via {tenant.name}',
+                        'url': f'/auth/keycloak/login/?tenant={tenant.slug}',
+                        'logo': '',
+                        'auto_redirect': False,
+                    })
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return methods
+
+    """ return [
         {
             'name': 'OpenID',
             'enabled': settings.AUTH_OPENID,
@@ -146,4 +176,4 @@ def get_auth_methods():
             'url': reverse('api-auth:passkey-login'),
             'logo': static('img/login_passkey.png')
         }
-    ]
+    ]"""

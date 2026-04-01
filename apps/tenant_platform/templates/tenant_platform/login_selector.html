@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Organization — JumpServer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+        }
+        h2 {
+            color: #1a1a2e;
+            margin-bottom: 8px;
+            font-size: 22px;
+        }
+        p.subtitle {
+            color: #666;
+            margin-bottom: 28px;
+            font-size: 14px;
+        }
+        .tenant-list {
+            list-style: none;
+            margin-bottom: 28px;
+        }
+        .tenant-list li {
+            margin-bottom: 10px;
+        }
+        .tenant-list a {
+            display: block;
+            padding: 12px 16px;
+            background: #f7f8fa;
+            border: 1px solid #e4e6ea;
+            border-radius: 6px;
+            color: #1a1a2e;
+            text-decoration: none;
+            font-size: 15px;
+            transition: all 0.2s;
+        }
+        .tenant-list a:hover {
+            background: #e8f4fd;
+            border-color: #1890ff;
+            color: #1890ff;
+        }
+        .divider {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            color: #999;
+            font-size: 13px;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #e4e6ea;
+        }
+        .divider::before { margin-right: 12px; }
+        .divider::after { margin-left: 12px; }
+        .manual-form {
+            display: flex;
+            gap: 8px;
+        }
+        .manual-form input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .manual-form input:focus {
+            border-color: #1890ff;
+            box-shadow: 0 0 0 2px rgba(24,144,255,0.1);
+        }
+        .manual-form button {
+            padding: 10px 18px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+        .manual-form button:hover {
+            background: #096dd9;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 28px;
+            font-size: 28px;
+            font-weight: 700;
+            color: #1890ff;
+            letter-spacing: -0.5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">JumpServer</div>
+        <h2>Select Organization</h2>
+        <p class="subtitle">Choose your organization to continue</p>
+
+        {% if tenants %}
+        <ul class="tenant-list">
+            {% for tenant in tenants %}
+            <li>
+                <a href="/core/auth/keycloak/login/?tenant={{ tenant.slug }}">
+                    {{ tenant.name }}
+                    {% if tenant.is_master %}
+                    <span style="float:right;font-size:11px;color:#999;margin-top:2px">Platform Admin</span>
+                    {% endif %}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <div class="divider">or enter organization slug manually</div>
+
+        <form class="manual-form" onsubmit="goToTenant(event)">
+            <input
+                type="text"
+                id="tenantSlug"
+                placeholder="e.g. my-company"
+                autocomplete="off"
+                autocapitalize="none"
+            />
+            <button type="submit">Login →</button>
+        </form>
+    </div>
+
+    <script>
+        function goToTenant(e) {
+            e.preventDefault();
+            var slug = document.getElementById('tenantSlug').value.trim();
+            if (!slug) return;
+            window.location.href = '/core/auth/keycloak/login/?tenant=' + encodeURIComponent(slug);
+        }
+        // Auto-focus the input if no tenants shown
+        {% if not tenants %}
+        document.getElementById('tenantSlug').focus();
+        {% endif %}
+    </script>
+</body>
+</html>
