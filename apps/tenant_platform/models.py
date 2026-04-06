@@ -88,7 +88,7 @@ class TenantKeycloakConfig(models.Model):
         default="S256",
         choices=[("S256", "SHA-256"), ("plain", "Plain")]
     )
-
+    
     # Role mapping: Keycloak group name → JumpServer role name
     # JSON format: {"jumpserver-admins": "OrgAdmin", "jumpserver-auditors": "OrgAuditor"}
     role_mapping = models.JSONField(

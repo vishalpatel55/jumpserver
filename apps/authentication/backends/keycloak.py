@@ -5,11 +5,9 @@ import base64
 import hashlib
 import logging
 import os
-from urllib.parse import urlencode
 
 import requests
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 
 from authentication.backends.base import JMSModelBackend
 
@@ -61,7 +59,8 @@ def validate_id_token(id_token: str, kc_config) -> dict:
     expected_iss = kc_config.issuer
     if claims.get('iss') != expected_iss:
         raise ValueError(
-            f"Token issuer mismatch: expected {expected_iss}, got {claims.get('iss')}"
+            f"Token issuer mismatch: expected {expected_iss}, "
+            f"got {claims.get('iss')}"
         )
 
     return claims
@@ -122,7 +121,7 @@ class KeycloakOIDCBackend(JMSModelBackend):
 
         namespaced_username = f"{tenant.slug}__{username}"
 
-        # Step 1: try to find by namespaced username (fast path — already linked)
+        # Step 1: try to find by namespaced username (fast path)
         user = User.objects.filter(username=namespaced_username).first()
 
         if user:
@@ -138,16 +137,15 @@ class KeycloakOIDCBackend(JMSModelBackend):
                 user.save(update_fields=['email', 'name'])
 
         else:
-            # Step 2: check if a user with this email already exists
+            # Step 2: check if email already exists
             existing_by_email = (
                 User.objects.filter(email=email).first() if email else None
             )
 
             if existing_by_email:
-                # Link existing user to this tenant by updating their username
                 logger.info(
-                    "Linking existing user (email=%s, username=%s) "
-                    "to tenant=%s with namespaced username=%s",
+                    "Linking existing user email=%s username=%s "
+                    "to tenant=%s as %s",
                     email, existing_by_email.username,
                     tenant.slug, namespaced_username
                 )
@@ -163,7 +161,7 @@ class KeycloakOIDCBackend(JMSModelBackend):
             else:
                 # Step 3: create brand new user
                 logger.info(
-                    "Creating new user username=%s email=%s for tenant=%s",
+                    "Creating new user username=%s email=%s tenant=%s",
                     namespaced_username, email, tenant.slug
                 )
                 user = User(
@@ -176,18 +174,24 @@ class KeycloakOIDCBackend(JMSModelBackend):
                 user.set_unusable_password()
                 user.save()
 
-        # Bind user to tenant org
+        # Bind user to this tenant's JumpServer org
         self._bind_user_to_org(user, tenant)
+
+        # Assign JumpServer role based on Keycloak groups in token
+        self._assign_roles(user, tenant, claims)
+
+        # Master tenant users automatically become platform admins
+        if tenant.is_master:
+            self._ensure_platform_admin(user, tenant)
 
         return user
 
-    def _bind_user_to_org(self, user, tenant):
-        """Add user to the JumpServer Organization that maps to this tenant."""
-        from orgs.models import Organization
+    # ── Org Binding ───────────────────────────────────────────────────────────
 
+    def _bind_user_to_org(self, user, tenant):
+        """Add user to the JumpServer Organization mapped to this tenant."""
         org = self._get_or_create_org_for_tenant(tenant)
         org.add_member(user)
-        
 
     def _get_or_create_org_for_tenant(self, tenant):
         from orgs.models import Organization
@@ -205,6 +209,152 @@ class KeycloakOIDCBackend(JMSModelBackend):
                 org.id, org.name, tenant.slug
             )
         return org
+
+    # ── Role Assignment ───────────────────────────────────────────────────────
+
+    def _assign_roles(self, user, tenant, claims: dict):
+        """
+        Map Keycloak groups from the id_token to JumpServer RBAC roles.
+
+        Flow:
+          1. Read 'groups' claim from token  e.g. ["jumpserver-admins"]
+          2. Look up role_mapping on TenantKeycloakConfig
+             e.g. {"jumpserver-admins": "OrgAdmin", "jumpserver-users": "User"}
+          3. First matching group wins → assign that JumpServer role in this org
+          4. No match → assign default_role (default: "User")
+          5. Remove stale org-scoped role bindings before assigning new one
+             so re-login always reflects current Keycloak group membership
+        """
+        try:
+            from rbac.models import Role, RoleBinding
+            from orgs.models import Organization
+
+            kc_config = tenant.keycloak_config
+            role_mapping = kc_config.role_mapping or {}
+            default_role_name = kc_config.default_role or 'User'
+
+            # ── Read groups from token ─────────────────────────────────────
+            # Keycloak sends groups as ["jumpserver-admins"] or ["/jumpserver-admins"]
+            # depending on the "Full group path" mapper setting.
+            raw_groups = claims.get(kc_config.claim_groups, [])
+            # Normalise: strip leading slash so mapping keys don't need it
+            user_groups = {g.lstrip('/') for g in raw_groups}
+
+            logger.info(
+                "Role assignment: user=%s groups=%s mapping=%s",
+                user.username, user_groups, role_mapping
+            )
+
+            # ── Match group → role ─────────────────────────────────────────
+            # First matching key in role_mapping wins.
+            # Order matters if a user belongs to multiple groups —
+            # put higher-privilege groups first in the mapping dict.
+            target_role_name = default_role_name
+            matched_group = None
+
+            for kc_group, js_role in role_mapping.items():
+                if kc_group in user_groups:
+                    target_role_name = js_role
+                    matched_group = kc_group
+                    break
+
+            if matched_group:
+                logger.info(
+                    "Matched group='%s' → role='%s' for user=%s",
+                    matched_group, target_role_name, user.username
+                )
+            else:
+                logger.info(
+                    "No group match for user=%s — using default role='%s'",
+                    user.username, target_role_name
+                )
+
+            # ── Resolve JumpServer role ────────────────────────────────────
+            role = Role.objects.filter(name=target_role_name).first()
+            if not role:
+                logger.warning(
+                    "Role '%s' not found in JumpServer, falling back to 'User'",
+                    target_role_name
+                )
+                role = Role.objects.filter(name='User').first()
+
+            if not role:
+                logger.error(
+                    "No roles found in JumpServer RBAC — skipping assignment "
+                    "for user=%s", user.username
+                )
+                return
+
+            # ── Get org for this tenant ────────────────────────────────────
+            org = self._get_or_create_org_for_tenant(tenant)
+
+            # ── Remove stale org-scoped bindings ───────────────────────────
+            # Always refresh on login so role changes in Keycloak take effect
+            # immediately on next login without manual intervention.
+            deleted_count, _ = RoleBinding.objects.filter(
+                user=user,
+                org=org,
+                role__scope='org',
+            ).delete()
+            if deleted_count:
+                logger.info(
+                    "Removed %d stale org role binding(s) for user=%s org=%s",
+                    deleted_count, user.username, org.name
+                )
+
+            # ── Create new role binding ────────────────────────────────────
+            RoleBinding.objects.get_or_create(
+                user=user,
+                role=role,
+                org=org,
+            )
+
+            logger.info(
+                "Assigned role='%s' to user=%s in org=%s",
+                role.name, user.username, org.name
+            )
+
+        except Exception as e:
+            # Never block login due to role assignment failure
+            logger.error(
+                "Role assignment failed for user=%s tenant=%s: %s",
+                user.username, tenant.slug, e,
+                exc_info=True
+            )
+
+    # ── Platform Admin ────────────────────────────────────────────────────────
+
+    def _ensure_platform_admin(self, user, tenant):
+        """
+        Any user who successfully authenticates via the master tenant
+        automatically gets a platform admin binding.
+        This allows them to use the tenant management API.
+        """
+        try:
+            from tenant_platform.models import TenantAdminBinding
+
+            binding, created = TenantAdminBinding.objects.get_or_create(
+                tenant=tenant,
+                user=user,
+                defaults={'is_platform_admin': True}
+            )
+            if not created and not binding.is_platform_admin:
+                binding.is_platform_admin = True
+                binding.save(update_fields=['is_platform_admin'])
+
+            if created:
+                logger.info(
+                    "Created platform admin binding for user=%s",
+                    user.username
+                )
+        except Exception as e:
+            logger.error(
+                "Platform admin binding failed for user=%s: %s",
+                user.username, e,
+                exc_info=True
+            )
+
+    # ── Django Backend Required Method ────────────────────────────────────────
 
     def get_user(self, user_id):
         try:
